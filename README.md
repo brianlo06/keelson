@@ -47,3 +47,49 @@ tests/                # unit tests for scoring
 4. Repeat
 
 The `regression.jsonl` category grows as you discover real bugs. Never delete entries from it.
+
+## Install as an MCP server
+
+Keelson ships an MCP server so any tool that speaks Model Context Protocol —
+Claude Code, Cursor, ChatGPT desktop, etc. — can read/write memory through it.
+
+### Quick start (Claude Code)
+
+```bash
+claude mcp add keelson uv --directory /Users/brianlo/keelson run keelson-mcp
+```
+
+Or edit your MCP config (`~/.config/claude/mcp.json` or equivalent) directly:
+
+```json
+{
+  "mcpServers": {
+    "keelson": {
+      "command": "uv",
+      "args": ["--directory", "/Users/brianlo/keelson", "run", "keelson-mcp"]
+    }
+  }
+}
+```
+
+### What it exposes
+
+Seven tools, all backed by the same SQLite store at `~/.keelson/memory.db`
+(override with `KEELSON_DB_PATH`):
+
+| Tool | Purpose |
+|---|---|
+| `ingest_turn(role, content)` | Append to the immutable transcript |
+| `write_claim(subject, predicate, object, omega, ...)` | Write a structured fact, with supersession |
+| `recall(query)` | Natural-language Q → ω-hedged answer |
+| `claim_history(subject, predicate)` | Live + superseded values |
+| `list_live_claims(subject?, predicate?)` | Inspect current state |
+| `forget_entity(name, cascade=True)` | Scrub with ω-cascade |
+| `surface_scan(top_k=5)` | Proactive: contradictions, anniversaries, drift, stale, emerging |
+
+### Run standalone
+
+```bash
+uv run keelson-mcp                    # stdio transport
+KEELSON_DB_PATH=./test.db uv run keelson-mcp   # custom db
+```

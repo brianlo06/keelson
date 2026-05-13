@@ -217,6 +217,16 @@ class KeelsonStore:
         row = self.conn.execute("SELECT * FROM entities WHERE id = ?", (entity_id,)).fetchone()
         return _to_entity(row) if row else None
 
+    def find_entity(self, name: str) -> EntityRow | None:
+        """Look up an entity by name. Does not create one if missing.
+        Use this when the caller's intent is to operate on an existing entity
+        (e.g. forgetting it) rather than to ensure it exists.
+        """
+        row = self.conn.execute(
+            "SELECT * FROM entities WHERE canonical_name = ?", (_canonical(name),)
+        ).fetchone()
+        return _to_entity(row) if row else None
+
     # --- claims --------------------------------------------------------------
 
     def write_claim(
