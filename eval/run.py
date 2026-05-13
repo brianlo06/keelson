@@ -19,6 +19,7 @@ import anthropic
 from dotenv import load_dotenv
 
 from keelson.extractor import Extractor
+from eval.holistic import HolisticJudge, HolisticVerdict
 from eval.judge import Judge
 from eval.score import ExampleScore, aggregate, score_example
 from eval.types import EvalExample
@@ -68,12 +69,18 @@ def main() -> int:
     parser.add_argument("--category", help="Run only one category (e.g. direct_claim)")
     parser.add_argument("--limit", type=int, help="Run at most N examples per category")
     parser.add_argument("--verbose", "-v", action="store_true", help="Print per-example detail")
+    parser.add_argument(
+        "--holistic",
+        action="store_true",
+        help="Also run the holistic LLM-as-judge evaluator. Adds ~1 Claude call per example.",
+    )
     args = parser.parse_args()
 
     load_dotenv()
     client = anthropic.Anthropic()
     extractor = Extractor(client=client)
     judge = Judge(client=client)
+    holistic = HolisticJudge(client=client) if args.holistic else None
 
     examples = load_examples(args.category)
     if not examples:
@@ -88,6 +95,7 @@ def main() -> int:
     print(f"running {len(examples)} example(s)...\n")
 
     scores_by_cat: dict[str, list[ExampleScore]] = defaultdict(list)
+    holistic_by_cat: dict[str, list[HolisticVerdict]] = defaultdict(list)
     current_cat = None
 
     for ex in examples:
@@ -110,6 +118,14 @@ def main() -> int:
         scores_by_cat[ex.category].append(score)
         print_score(score, ex, args.verbose)
 
+        if holistic is not None:
+            verdict = holistic.judge(ex, result.claims)
+            holistic_by_cat[ex.category].append(verdict)
+            if args.verbose:
+                print(f"       holistic: cov={verdict.coverage:.2f} prec={verdict.precision:.2f} "
+                      f"ω={verdict.omega:.2f} use={verdict.usefulness:.2f}  "
+                      f"({verdict.rationale[:80]})")
+
     # Summary
     print("\n\n=== SUMMARY ===")
     print(f"{'category':<30s} {'n':>4s} {'composite':>10s} {'precision':>10s} {'recall':>8s} {'ω-cal':>8s}")
@@ -126,6 +142,35 @@ def main() -> int:
           f"{total['precision']:>10.2f} {total['recall']:>8.2f} {total['omega_calibration']:>8.2f}")
     if total["forbidden_hits"]:
         print(f"\n*** {int(total['forbidden_hits'])} example(s) emitted FORBIDDEN claims (precision floor hit) ***")
+
+    if holistic is not None:
+        print(f"\n=== HOLISTIC (LLM-as-judge) ===")
+        print(f"{'category':<30s} {'n':>4s} {'overall':>8s} {'cov':>6s} {'prec':>6s} "
+              f"{'omega':>6s} {'use':>6s}")
+        all_holistic: list[HolisticVerdict] = []
+        for cat in sorted(holistic_by_cat.keys()):
+            vs = holistic_by_cat[cat]
+            n = len(vs)
+            if not n:
+                continue
+            mean_overall = sum(v.overall for v in vs) / n
+            mean_cov = sum(v.coverage for v in vs) / n
+            mean_prec = sum(v.precision for v in vs) / n
+            mean_omega = sum(v.omega for v in vs) / n
+            mean_use = sum(v.usefulness for v in vs) / n
+            print(f"{cat:<30s} {n:>4d} {mean_overall:>8.2f} {mean_cov:>6.2f} {mean_prec:>6.2f} "
+                  f"{mean_omega:>6.2f} {mean_use:>6.2f}")
+            all_holistic.extend(vs)
+        if all_holistic:
+            n = len(all_holistic)
+            mean_overall = sum(v.overall for v in all_holistic) / n
+            mean_cov = sum(v.coverage for v in all_holistic) / n
+            mean_prec = sum(v.precision for v in all_holistic) / n
+            mean_omega = sum(v.omega for v in all_holistic) / n
+            mean_use = sum(v.usefulness for v in all_holistic) / n
+            print("-" * 80)
+            print(f"{'TOTAL':<30s} {n:>4d} {mean_overall:>8.2f} {mean_cov:>6.2f} {mean_prec:>6.2f} "
+                  f"{mean_omega:>6.2f} {mean_use:>6.2f}")
 
     return 0 if total["composite"] >= 0.7 else 1
 
