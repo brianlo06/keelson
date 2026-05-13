@@ -1,5 +1,7 @@
 # Keelson
 
+[![Tests](https://github.com/brianlo06/keelson/actions/workflows/test.yml/badge.svg)](https://github.com/brianlo06/keelson/actions/workflows/test.yml)
+
 Personal LLM memory architecture — three primitives, no decoration.
 
 1. **Immutable JSONL transcript** — append-only, never edited
