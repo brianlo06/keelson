@@ -146,8 +146,12 @@ def score_example(
         omega_scores.append(1.0 if _omega_in_range(m.extracted.omega, lo, hi) else 0.0)
         if m.verdict is not None:
             predicate_scores.append(m.verdict.predicate_match)
-    omega_calibration = sum(omega_scores) / max(1, len(omega_scores))
-    predicate_correctness = sum(predicate_scores) / max(1, len(predicate_scores))
+    # Vacuously perfect when there's nothing to score (e.g. chit-chat correctly
+    # extracts no claims — there are no ωs or predicates to validate).
+    omega_calibration = sum(omega_scores) / len(omega_scores) if omega_scores else 1.0
+    predicate_correctness = (
+        sum(predicate_scores) / len(predicate_scores) if predicate_scores else 1.0
+    )
 
     if forbidden_hits:
         composite = 0.0

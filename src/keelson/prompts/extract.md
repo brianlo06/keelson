@@ -34,6 +34,45 @@ Return ONLY valid JSON, no preamble or commentary:
 
 If no claims, return `{"claims": []}`. NEVER invent claims to fill the array.
 
+## Conservative extraction (about decomposition, not omission)
+
+When a single discrete fact has multiple details, emit ONE claim that captures
+them — not multiple atomic claims. The `object` field can be a phrase that
+holds the full detail ("retired from teaching after 30 years" is ONE claim
+about ONE event, not a `did` claim plus a `career_duration` claim).
+
+This rule is about how to DECOMPOSE a fact, not about WHETHER to extract.
+You should still:
+- Extract inferred claims (with low ω like 0.25) when context implies a fact
+- Extract claims about third parties (ω capped at 0.50) when the user describes them
+- Extract negated claims (`is_not`, `avoids`) when the user denies something
+
+The rule simply says: when you've decided to extract a fact, prefer one
+comprehensive claim over many fragmentary ones.
+
+## Negation
+
+A negative statement about the user is itself a claim — with the right
+predicate. Don't strip the negation off and emit the underlying positive.
+
+- "I'm not religious" → `is_not: religious` (NOT `identifies_as: religious`)
+- "I don't drink coffee" → `avoids: coffee` (NOT `drinks: coffee` or `likes: coffee`)
+- "I haven't talked to my dad in years" → `estranged_from: dad`
+- "I never went to college" → `did_not: attend college`
+
+## Life events that END a state
+
+Events that end a state are CLAIMS even when wrapped in emotional commentary.
+Don't dismiss them as transient feelings.
+
+- "I broke up with Jamie last week" → `had_relationship: Jamie` (supersedes `has_relationship`)
+- "I quit my job at Google" → `worked_at_previously: Google` (supersedes `works_at`)
+- "Our dog Penny passed away" → `had_pet: Penny` (supersedes `has_pet`)
+- "I sold the corgi back to the breeder" → `had_pet: corgi` (supersedes `has_pet`)
+
+The trailing emotional commentary ("it's been rough", "miss her", "vet bills
+were too much") is NOT a separate claim — extract only the event itself.
+
 ## omega (ω) assignment
 
 | Range | When |
@@ -113,18 +152,53 @@ USER: "Just got the offer — I'm leaving Google for Anthropic next month."
 }
 ```
 
-### About someone else
+### About someone else (be conservative — one claim, ω≤0.50)
 
 USER: "My mom just retired from teaching after 30 years."
 
 ```json
 {
   "claims": [
-    {"subject": "user.mom", "predicate": "did", "object": "retired from teaching", "valid_from": "now", "omega": 0.50, "supersedes_hint": "current_role", "source_phrase": "My mom just retired"},
-    {"subject": "user.mom", "predicate": "career_duration", "object": "30 years in teaching", "valid_from": "unknown", "omega": 0.50, "supersedes_hint": null, "source_phrase": "after 30 years"}
+    {"subject": "user.mom", "predicate": "did", "object": "retired from teaching after 30 years", "valid_from": "now", "omega": 0.50, "supersedes_hint": "current_role", "source_phrase": "My mom just retired from teaching"}
   ]
 }
 ```
+
+Note: a single discrete event is ONE claim. The duration ("after 30 years") is
+part of the event description, not a separate `career_duration` claim. For
+third parties, ω is capped at 0.50 — you know what the user told you, not
+whether it's accurate.
+
+### Negation: "I'm not X"
+
+USER: "I'm not religious, but I do meditate daily."
+
+```json
+{
+  "claims": [
+    {"subject": "user", "predicate": "is_not", "object": "religious", "valid_from": "now", "omega": 0.85, "supersedes_hint": null, "source_phrase": "I'm not religious"},
+    {"subject": "user", "predicate": "practices", "object": "meditation (daily)", "valid_from": "now", "omega": 0.85, "supersedes_hint": null, "source_phrase": "I do meditate daily"}
+  ]
+}
+```
+
+CRITICAL: do NOT emit a positive claim (`identifies_as: religious`) when the
+user is negating that very thing. The negation IS the claim.
+
+### Ending a relationship
+
+USER: "I broke up with Jamie last week. It's been rough."
+
+```json
+{
+  "claims": [
+    {"subject": "user", "predicate": "had_relationship", "object": "Jamie", "valid_from": "now", "omega": 1.00, "supersedes_hint": "has_relationship", "source_phrase": "I broke up with Jamie"}
+  ]
+}
+```
+
+Note: "It's been rough" is transient emotional commentary — NOT a claim.
+The breakup itself IS a claim and supersedes any prior `has_relationship`.
 
 ### Hedge / non-claim
 
