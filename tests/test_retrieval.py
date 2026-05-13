@@ -69,6 +69,44 @@ def test_parse_unknown_falls_back_to_search():
     assert "yosemite" in spec.keywords
 
 
+def test_parse_tell_me_about_my_pet_routes_to_predicate():
+    """The store has 'has_pet' as a predicate, not 'pet' as an entity.
+    The parser should recognize this and route to a predicate lookup."""
+    spec = rule_based_parse("Tell me about my pet")
+    assert spec.intent == "list"
+    assert spec.subjects == ("user",)
+    assert "has_pet" in spec.predicates
+
+
+def test_parse_tell_me_about_my_job_routes_to_works_at():
+    spec = rule_based_parse("Tell me about my job")
+    assert spec.intent == "list"
+    assert "works_at" in spec.predicates
+
+
+def test_parse_what_is_my_job_uses_predicate_map():
+    spec = rule_based_parse("What is my job?")
+    assert spec.intent == "lookup"
+    assert "works_at" in spec.predicates
+
+
+def test_parse_relational_still_takes_precedence_over_possessive():
+    """'mom' is in RELATIONAL_TERMS, not POSSESSIVE_PREDICATES. The relational
+    pathway is the right one for human relations."""
+    spec = rule_based_parse("Tell me about my mom")
+    assert spec.intent == "entity_lookup"
+    assert spec.subjects == ("user.mom",)
+
+
+def test_retrieve_my_pet_finds_has_pet_claim(store):
+    """Integration: 'Tell me about my pet' should retrieve the has_pet claim."""
+    store.write_claim("user", "has_pet", "Penny (corgi)", omega=1.0)
+    r = Retriever(store)
+    result = r.query("Tell me about my pet")
+    assert len(result.claims) == 1
+    assert "Penny" in result.claims[0].object_text
+
+
 # --- retrieval integration tests --------------------------------------------
 
 

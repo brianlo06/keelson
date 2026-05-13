@@ -70,6 +70,29 @@ RELATIONAL_TERMS = {
     "therapist", "doctor", "vet",
 }
 
+# Things-the-user-has-or-does, where the user's noun maps to a *predicate*
+# on `user`, not an entity to look up. "Tell me about my pet" → claims with
+# predicate=has_pet for user. This must take precedence over the entity
+# lookup, since the store has predicates like `has_pet` but no entity named
+# "pet".
+POSSESSIVE_PREDICATES: dict[str, tuple[str, ...]] = {
+    "pet": ("has_pet",),
+    "pets": ("has_pet",),
+    "dog": ("has_pet",),
+    "cat": ("has_pet",),
+    "job": ("works_at", "role_at"),
+    "work": ("works_at", "role_at"),
+    "career": ("works_at", "role_at"),
+    "occupation": ("works_at", "role_at"),
+    "employer": ("works_at",),
+    "home": ("lives_in",),
+    "house": ("lives_in",),
+    "address": ("lives_in",),
+    "location": ("lives_in",),
+    "diet": ("diet",),
+    "religion": ("identifies_as", "is", "is_not"),
+}
+
 STOPWORDS = {
     "a", "an", "the", "i", "you", "we", "me", "my", "your", "our",
     "what", "where", "who", "when", "why", "how", "do", "did", "does",
@@ -108,14 +131,32 @@ def rule_based_parse(query: str) -> QuerySpec:
     q = _strip_punctuation(query)
     q_lower = q.lower()
 
+    def _strip_possessive(raw_target: str) -> str:
+        return re.sub(r"^(?:my|your)\s+", "", raw_target.strip())
+
     def _resolve_target(raw_target: str) -> str:
         """Strip 'my '/'your ' and normalize relational terms to user.<role>."""
-        t = re.sub(r"^(?:my|your)\s+", "", raw_target.strip())
+        t = _strip_possessive(raw_target)
         if t in RELATIONAL_TERMS:
             return _normalize_relational(t)
         return t
 
-    # "tell me about <X>" / "what do you know about <X>" → entity_lookup
+    def _possessive_predicate_spec(raw_target: str, query_str: str) -> QuerySpec | None:
+        """If raw_target maps to a possessive predicate (e.g. 'my pet' -> has_pet),
+        return a list-intent QuerySpec on the user. Otherwise None."""
+        t = _strip_possessive(raw_target)
+        if t in POSSESSIVE_PREDICATES:
+            return QuerySpec(
+                intent="list",
+                subjects=("user",),
+                predicates=POSSESSIVE_PREDICATES[t],
+                keywords=tuple(tok for tok in _tokenize(t) if tok not in STOPWORDS),
+                raw=query_str,
+            )
+        return None
+
+    # "tell me about <X>" / "what do you know about <X>" → list (if possessive
+    # predicate like 'my pet'/'my job') or entity_lookup
     m = re.match(
         r"^(?:tell me (?:everything |all |what you know )?about|"
         r"what (?:do you|did you) know about|"
@@ -124,6 +165,9 @@ def rule_based_parse(query: str) -> QuerySpec:
     )
     if m:
         target = m.group(1).strip()
+        spec = _possessive_predicate_spec(target, query)
+        if spec is not None:
+            return spec
         return QuerySpec(
             intent="entity_lookup",
             subjects=(_resolve_target(target),),
@@ -139,6 +183,9 @@ def rule_based_parse(query: str) -> QuerySpec:
     )
     if m:
         target = m.group(1).strip()
+        spec = _possessive_predicate_spec(target, query)
+        if spec is not None:
+            return spec
         return QuerySpec(
             intent="entity_lookup",
             subjects=(_resolve_target(target),),
@@ -183,7 +230,10 @@ def rule_based_parse(query: str) -> QuerySpec:
     m = re.match(r"^(?:what is|what's) my (\w+)", q_lower)
     if m:
         attr = m.group(1)
-        return QuerySpec(intent="lookup", subjects=("user",), predicates=(attr,), raw=query)
+        # Possessive predicates map a noun to the actual stored predicate name
+        # ("what is my job" → predicates=works_at,role_at; not predicate=job)
+        predicates = POSSESSIVE_PREDICATES.get(attr, (attr,))
+        return QuerySpec(intent="lookup", subjects=("user",), predicates=predicates, raw=query)
     if q_lower in {"how old am i", "what's my age"}:
         return QuerySpec(intent="lookup", subjects=("user",), predicates=("age",), raw=query)
 
