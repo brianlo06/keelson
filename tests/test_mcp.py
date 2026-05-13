@@ -152,6 +152,89 @@ def test_surface_scan_finds_contradiction(store):
     assert "Google" in out and "Anthropic" in out
 
 
+def test_backup_db_creates_file(store, tmp_path, monkeypatch):
+    monkeypatch.setenv("KEELSON_DB_PATH", str(tmp_path / "active.db"))
+    _unwrap(write_claim)(subject="user", predicate="works_at", object="X", omega=0.85)
+    from keelson.mcp_server import backup_db
+    target = tmp_path / "snap.db"
+    out = _unwrap(backup_db)(target_path=str(target))
+    assert target.exists()
+    assert str(target) in out
+
+
+def test_restore_db_swaps_state(store, tmp_path, monkeypatch):
+    """Backup → mutate → restore should bring back the pre-mutation state."""
+    monkeypatch.setenv("KEELSON_DB_PATH", str(tmp_path / "active.db"))
+    from keelson.mcp_server import backup_db, restore_db, _set_store_for_testing
+
+    # We need the singleton path to match the env, so close the test fixture and
+    # let the server open a fresh store via get_store() at the env-pointed path
+    _set_store_for_testing(None)
+
+    _unwrap(write_claim)(subject="user", predicate="works_at", object="OLD", omega=0.85)
+    snap = tmp_path / "snap.db"
+    _unwrap(backup_db)(target_path=str(snap))
+
+    # Mutate the live state away from the snapshot
+    _unwrap(write_claim)(subject="user", predicate="lives_in", object="NEW", omega=0.85)
+
+    # Restore — the lives_in claim should vanish
+    out = _unwrap(restore_db)(backup_path=str(snap))
+    assert "Restored from" in out
+    assert "OLD" in _unwrap(list_live_claims)(predicate="works_at")
+    assert _unwrap(list_live_claims)(predicate="lives_in").startswith("No live claims")
+
+
+def test_restore_db_missing_file(store, tmp_path):
+    from keelson.mcp_server import restore_db
+    out = _unwrap(restore_db)(backup_path=str(tmp_path / "ghost.db"))
+    assert "does not exist" in out
+
+
+def test_extract_and_store_requires_api_key(store, monkeypatch):
+    """Without ANTHROPIC_API_KEY, the tool should error politely without
+    attempting an API call."""
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    from keelson.mcp_server import extract_and_store
+    out = _unwrap(extract_and_store)(content="I work at Anthropic.")
+    assert "ANTHROPIC_API_KEY not set" in out
+
+
+def test_extract_and_store_writes_claims_via_mocked_extractor(store, monkeypatch):
+    """With a mocked extractor, the tool should append a turn AND write the
+    returned claims."""
+    monkeypatch.setenv("ANTHROPIC_API_KEY", "test-key")
+
+    from unittest.mock import MagicMock, patch
+
+    from keelson.mcp_server import extract_and_store
+    from keelson.schema import Claim, ExtractionResult
+
+    fake_result = ExtractionResult(
+        claims=[
+            Claim(
+                subject="user",
+                predicate="works_at",
+                object="Anthropic",
+                valid_from="now",
+                omega=0.85,
+                source_phrase="I work at Anthropic",
+                supersedes_hint="works_at",
+            )
+        ]
+    )
+    fake_extractor = MagicMock()
+    fake_extractor.extract.return_value = fake_result
+
+    with patch("keelson.extractor.Extractor", return_value=fake_extractor):
+        out = _unwrap(extract_and_store)(content="I work at Anthropic.")
+
+    assert "extracted 1 claim" in out
+    live = store.live_claims(subject="user", predicate="works_at")
+    assert len(live) == 1
+    assert live[0].object_text == "Anthropic"
+
+
 def test_surface_scan_mark_shown_cooldown(store):
     # Backdate an entity to trigger stale_relationship
     from datetime import datetime, timedelta, timezone

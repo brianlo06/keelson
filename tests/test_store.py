@@ -179,6 +179,45 @@ def test_fts_search(store):
     assert len(hits) == 2
 
 
+def test_backup_to_creates_usable_copy(store, tmp_path):
+    """backup_to should produce a SQLite file that can be opened as a new store
+    and contains the same data."""
+    store.write_claim("user", "works_at", "Anthropic", omega=0.85)
+    target = tmp_path / "backup.db"
+    store.backup_to(target)
+    assert target.exists()
+
+    # Open the backup and verify the claim is there
+    restored = KeelsonStore(target)
+    try:
+        live = restored.live_claims(subject="user", predicate="works_at")
+        assert len(live) == 1
+        assert live[0].object_text == "Anthropic"
+    finally:
+        restored.close()
+
+
+def test_backup_to_overwrites_prior_backup(store, tmp_path):
+    """Backing up to a path that holds a previous backup should replace it."""
+    target = tmp_path / "backup.db"
+    # Seed the target with a prior backup that has different data
+    prior = KeelsonStore(target)
+    prior.write_claim("user", "old_field", "OLD_VALUE", omega=0.85)
+    prior.close()
+
+    # Now back up the current store over it
+    store.write_claim("user", "works_at", "Anthropic", omega=0.85)
+    store.backup_to(target)
+
+    restored = KeelsonStore(target)
+    try:
+        assert len(restored.live_claims(subject="user", predicate="works_at")) == 1
+        # Old data should be gone — backup is a full replacement, not a merge
+        assert restored.live_claims(subject="user", predicate="old_field") == []
+    finally:
+        restored.close()
+
+
 def test_live_claims_filter_by_omega(store):
     store.write_claim("user", "did", "marathon (inferred)", omega=0.25)
     store.write_claim("user", "did", "wedding", omega=1.0)

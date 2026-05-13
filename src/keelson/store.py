@@ -150,6 +150,17 @@ class KeelsonStore:
     def close(self) -> None:
         self.conn.close()
 
+    def backup_to(self, target: str | Path) -> None:
+        """Copy current state to a new SQLite file via SQLite's online backup API.
+        Safe to call while the store is in use; the target file is overwritten if
+        it exists."""
+        target_path = str(target)
+        target_conn = sqlite3.connect(target_path)
+        try:
+            self.conn.backup(target_conn)
+        finally:
+            target_conn.close()
+
     @contextmanager
     def transaction(self) -> Iterator[sqlite3.Connection]:
         try:

@@ -14,11 +14,17 @@ runs offline; an LLM-backed composer can replace it once the API is wired.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass, field
-from typing import Callable
+from typing import Callable, TYPE_CHECKING
 
 from keelson.retrieval import QuerySpec, RetrievalResult
 from keelson.store import ClaimRow, KeelsonStore, TurnRow
+
+if TYPE_CHECKING:
+    import anthropic
+
+COMPOSE_MODEL = "claude-opus-4-7"
 
 
 @dataclass
@@ -197,3 +203,90 @@ def _fallback_or_empty(result: RetrievalResult, store: KeelsonStore | None) -> C
             confidence="low",
         )
     return ComposedResponse(text="I don't have anything on that.", confidence="none")
+
+
+# --- LLM-backed composer -----------------------------------------------------
+
+
+_LLM_SYSTEM = """You compose responses for a personal memory system. You receive
+a user query and structured facts retrieved from memory. Write a brief, natural
+response that honors the provenance scalar ω (omega) per fact:
+
+  ω ≥ 0.85   direct statement       e.g. "You work at Anthropic."
+  0.40-0.84  hedged                 e.g. "You mentioned working at Anthropic."
+  ω < 0.40   inference disclaimer   e.g. "From context I gather you ran a marathon."
+
+For claims about other people (user.mom, user.partner, etc.), ω is typically
+0.5 — the user reported it, you don't know it firsthand. Use phrasing like
+"You told me your mom retired" rather than "Your mom retired."
+
+For a history view (live + past values for the same predicate), say what's
+current first, then "Previously: ..." with the past values.
+
+Be concise. Don't pad. Don't add information not in the retrieved facts.
+If facts are empty, say "I don't have anything on that." — nothing else.
+"""
+
+
+def _facts_summary(result: RetrievalResult, store: KeelsonStore | None) -> str:
+    lines: list[str] = []
+    for c in result.claims:
+        subject = _subject_name(store, c)
+        lines.append(f"  CLAIM: {subject} {c.predicate} {c.object_text}  (ω={c.omega:.2f})")
+    for c in result.history:
+        status = "live" if c.valid_to is None else "past"
+        subject = _subject_name(store, c)
+        lines.append(f"  HISTORY ({status}): {subject} {c.predicate} {c.object_text}  (ω={c.omega:.2f})")
+    for t in result.transcript_hits[:3]:
+        lines.append(f"  TURN ({t.ts[:10]}): {t.content!r}")
+    return "\n".join(lines)
+
+
+def llm_compose(
+    result: RetrievalResult,
+    store: KeelsonStore | None = None,
+    client: "anthropic.Anthropic | None" = None,
+) -> ComposedResponse:
+    """LLM-backed composer. Calls Claude to write natural-language responses
+    with ω-aware hedging. Auto-falls-back to rule_based_compose when no API
+    key is available and no client is passed.
+    """
+    if client is None and not os.environ.get("ANTHROPIC_API_KEY"):
+        return rule_based_compose(result, store=store)
+
+    # Lazy import — only when we actually need the SDK
+    if client is None:
+        import anthropic
+        client = anthropic.Anthropic()
+
+    facts = _facts_summary(result, store)
+    user_msg = f"User asked: {result.spec.raw}\n\nRetrieved facts:\n{facts or '  (none)'}"
+
+    response = client.messages.create(
+        model=COMPOSE_MODEL,
+        max_tokens=512,
+        thinking={"type": "adaptive"},
+        system=[
+            {
+                "type": "text",
+                "text": _LLM_SYSTEM,
+                "cache_control": {"type": "ephemeral"},
+            }
+        ],
+        messages=[{"role": "user", "content": user_msg}],
+    )
+
+    text = next(
+        (block.text for block in response.content if block.type == "text"),
+        "",
+    ).strip()
+    if not text:
+        text = "I don't have anything on that."
+
+    confidence = _overall_confidence(result.claims + result.history)
+    return ComposedResponse(
+        text=text,
+        cited_claims=[c.id for c in result.claims + result.history],
+        cited_turns=[t.id for t in result.transcript_hits[:3]],
+        confidence=confidence,
+    )

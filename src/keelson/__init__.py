@@ -1,4 +1,4 @@
-from keelson.compose import ComposedResponse, rule_based_compose
+from keelson.compose import ComposedResponse, llm_compose, rule_based_compose
 from keelson.extractor import Extractor, extract
 from keelson.retrieval import QuerySpec, RetrievalResult, Retriever, rule_based_parse
 from keelson.schema import Claim, ExtractionResult
@@ -20,6 +20,7 @@ __all__ = [
     "rule_based_parse",
     "ComposedResponse",
     "rule_based_compose",
+    "llm_compose",
     "Surfacer",
     "Surfaceable",
 ]

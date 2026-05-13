@@ -18,6 +18,7 @@ the messages more naturally, but the detection logic stays.
 
 from __future__ import annotations
 
+import re
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
@@ -31,6 +32,7 @@ SurfaceType = Literal[
     "unresolved_contradiction",
     "drift_candidate",
     "emerging_entity",
+    "co_occurrence",
 ]
 
 
@@ -75,6 +77,7 @@ class Surfacer:
         candidates.extend(self.unresolved_contradictions())
         candidates.extend(self.drift_candidates())
         candidates.extend(self.emerging_entities())
+        candidates.extend(self.co_occurrences())
 
         candidates = self._apply_cooldown(candidates, cooldown_days)
         candidates.sort(key=lambda c: c.priority, reverse=True)
@@ -279,6 +282,75 @@ class Surfacer:
                 ),
                 entity_id=row["id"],
                 evidence={"mention_count": row["mention_count"], "name": row["canonical_name"]},
+            ))
+        return out
+
+    def co_occurrences(
+        self,
+        days: int = 30,
+        min_count: int = 3,
+        max_pairs: int = 10,
+    ) -> list[Surfaceable]:
+        """Find entity pairs that get mentioned together in recent turns.
+
+        Simple word-boundary match against turn content — we'd rather miss a
+        substring match than falsely conflate (e.g. 'jamie' vs 'jamie's').
+
+        Only considers entity-entity pairs where both have entries in the
+        entities table. Skips the 'user' singleton (it co-occurs with
+        everything trivially).
+        """
+        cutoff = (self.now - timedelta(days=days)).isoformat(timespec="seconds")
+
+        entities = self.store.conn.execute(
+            """
+            SELECT id, canonical_name FROM entities
+            WHERE forgotten = 0 AND canonical_name != 'user'
+            """
+        ).fetchall()
+        if len(entities) < 2:
+            return []
+
+        turns = self.store.conn.execute(
+            "SELECT id, content FROM turns WHERE ts >= ?", (cutoff,)
+        ).fetchall()
+
+        co_count: dict[tuple[int, int], int] = defaultdict(int)
+        co_turns: dict[tuple[int, int], list[int]] = defaultdict(list)
+
+        for turn in turns:
+            content_lower = turn["content"].lower()
+            in_turn: list[int] = []
+            for ent in entities:
+                # canonical_name is already lowercased by store._canonical
+                pattern = rf"\b{re.escape(ent['canonical_name'])}\b"
+                if re.search(pattern, content_lower):
+                    in_turn.append(ent["id"])
+            for i, a in enumerate(in_turn):
+                for b in in_turn[i + 1:]:
+                    pair = (min(a, b), max(a, b))
+                    co_count[pair] += 1
+                    co_turns[pair].append(turn["id"])
+
+        pairs = sorted(
+            ((p, n) for p, n in co_count.items() if n >= min_count),
+            key=lambda x: x[1],
+            reverse=True,
+        )[:max_pairs]
+
+        name_by_id = {e["id"]: e["canonical_name"].title() for e in entities}
+        out: list[Surfaceable] = []
+        for (a, b), count in pairs:
+            out.append(Surfaceable(
+                type="co_occurrence",
+                target_key=f"co/{a}/{b}",
+                priority=0.5,
+                message=(
+                    f"You've mentioned {name_by_id[a]} and {name_by_id[b]} together "
+                    f"{count} times recently. Related?"
+                ),
+                turn_ids=tuple(co_turns[(a, b)]),
+                evidence={"entity_ids": [a, b], "count": count},
             ))
         return out
 

@@ -192,3 +192,52 @@ def test_compose_fts_fallback_when_no_claims(store):
     assert "Yosemite" in response.text
     assert response.confidence == "medium"
     assert response.cited_turns
+
+
+# --- LLM composer ------------------------------------------------------------
+
+
+def test_llm_compose_falls_back_without_api_key(monkeypatch, store):
+    """Without ANTHROPIC_API_KEY and no client, llm_compose should silently
+    delegate to rule_based_compose."""
+    from keelson.compose import llm_compose, rule_based_compose
+
+    monkeypatch.delenv("ANTHROPIC_API_KEY", raising=False)
+    store.write_claim("user", "works_at", "Anthropic", omega=0.95)
+    r = Retriever(store)
+    result = r.query("Where do I work?")
+
+    llm_out = llm_compose(result, store=store)
+    rule_out = rule_based_compose(result, store=store)
+    assert llm_out.text == rule_out.text
+
+
+def test_llm_compose_uses_client_when_provided(store):
+    """When a client is passed, llm_compose calls it with the expected shape."""
+    from types import SimpleNamespace
+    from unittest.mock import MagicMock
+
+    from keelson.compose import llm_compose
+
+    store.write_claim("user", "works_at", "Anthropic", omega=0.95)
+    r = Retriever(store)
+    result = r.query("Where do I work?")
+
+    mock_client = MagicMock()
+    mock_client.messages.create.return_value = SimpleNamespace(
+        content=[SimpleNamespace(type="text", text="You work at Anthropic.")]
+    )
+
+    response = llm_compose(result, store=store, client=mock_client)
+    assert response.text == "You work at Anthropic."
+
+    call = mock_client.messages.create.call_args
+    assert call.kwargs["model"] == "claude-opus-4-7"
+    assert call.kwargs["thinking"] == {"type": "adaptive"}
+    # System prompt is cached for cheap repeat calls
+    assert call.kwargs["system"][0]["cache_control"] == {"type": "ephemeral"}
+    # The query and retrieved facts must be in the user message
+    user_content = call.kwargs["messages"][0]["content"]
+    assert "Where do I work?" in user_content
+    assert "Anthropic" in user_content
+    assert "ω=0.95" in user_content

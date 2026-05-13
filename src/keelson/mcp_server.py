@@ -22,7 +22,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from keelson.compose import rule_based_compose
+from keelson.compose import llm_compose, rule_based_compose
 from keelson.retrieval import Retriever
 from keelson.store import KeelsonStore
 from keelson.surface import Surfacer
@@ -134,6 +134,9 @@ def recall(query: str) -> str:
     falling back to transcript search if needed. omega-aware speech:
       omega>=0.85 direct, omega>=0.40 hedged, omega<0.40 flagged as inference.
 
+    Uses LLM-backed natural-language composition when ANTHROPIC_API_KEY is set;
+    falls back to a rule-based composer otherwise.
+
     Examples:
       "Where do I work?"
       "Tell me about my mom"
@@ -141,10 +144,55 @@ def recall(query: str) -> str:
     """
     store = get_store()
     result = Retriever(store).query(query)
-    response = rule_based_compose(result, store=store)
+    response = llm_compose(result, store=store)
     if not response.text:
         return "I don't have anything on that."
     return response.text
+
+
+@mcp.tool()
+def extract_and_store(
+    content: str, role: str = "user", session_id: str = "default"
+) -> str:
+    """Ingest a turn AND run the Anthropic extractor on it to write structured
+    claims in one call. Requires ANTHROPIC_API_KEY in the environment.
+
+    For offline use (no API key), call ingest_turn + write_claim manually.
+    """
+    if role not in ("user", "assistant", "system"):
+        return f"Error: role must be 'user', 'assistant', or 'system'; got {role!r}"
+    if not os.environ.get("ANTHROPIC_API_KEY"):
+        return (
+            "Error: ANTHROPIC_API_KEY not set. Use ingest_turn + write_claim "
+            "manually, or set the env var and retry."
+        )
+
+    from keelson.extractor import Extractor
+
+    store = get_store()
+    tid = store.append_turn(session_id, role, content)
+
+    try:
+        result = Extractor().extract(content)
+    except Exception as e:
+        return f"Appended turn #{tid} but extractor errored: {type(e).__name__}: {e}"
+
+    if result.extraction_failed:
+        return f"Appended turn #{tid}; extraction failed: {result.failure_reason}"
+
+    written: list[int] = []
+    for claim in result.claims:
+        cid = store.write_claim(
+            subject=claim.subject,
+            predicate=claim.predicate,
+            object=claim.object,
+            omega=claim.omega,
+            source_turn_id=tid,
+            supersedes_hint=claim.supersedes_hint,
+        )
+        written.append(cid)
+
+    return f"Appended turn #{tid}, extracted {len(written)} claim(s): {written}"
 
 
 @mcp.tool()
@@ -213,6 +261,50 @@ def forget_entity(name: str, cascade: bool = True) -> str:
         f"direct claims={counts['direct']}, "
         f"omega-cascade claims={counts['omega_cascade']}"
     )
+
+
+@mcp.tool()
+def backup_db(target_path: str | None = None) -> str:
+    """Copy the memory database to a new file. With no target_path, auto-names
+    to memory-YYYY-MM-DD-HHMMSS.db next to the active DB. Recommended before
+    destructive operations like restore_db or forget_entity on important entities.
+    """
+    from datetime import datetime
+
+    store = get_store()
+    if target_path is None:
+        ts = datetime.now().strftime("%Y-%m-%d-%H%M%S")
+        target = get_db_path().parent / f"memory-{ts}.db"
+    else:
+        target = Path(target_path).expanduser()
+        target.parent.mkdir(parents=True, exist_ok=True)
+    store.backup_to(target)
+    return f"Backup saved to {target}"
+
+
+@mcp.tool()
+def restore_db(backup_path: str) -> str:
+    """Restore the memory database from a previous backup. REPLACES the current
+    state — run backup_db first if you might want to undo. After restore, the
+    new contents are immediately visible to subsequent tool calls.
+    """
+    import shutil
+
+    backup = Path(backup_path).expanduser()
+    if not backup.exists():
+        return f"Error: backup file {backup_path!r} does not exist."
+
+    global _store
+    if _store is not None:
+        _store.close()
+        _store = None
+
+    active = get_db_path()
+    active.parent.mkdir(parents=True, exist_ok=True)
+    shutil.copy(str(backup), str(active))
+
+    _store = KeelsonStore(active)
+    return f"Restored from {backup}. Active DB is now {active}."
 
 
 @mcp.tool()

@@ -183,6 +183,50 @@ def test_emerging_entity_silent_for_old_or_underused(store):
     assert cands == []
 
 
+# --- co_occurrence -----------------------------------------------------------
+
+
+def test_co_occurrence_fires_when_pair_mentioned_together(store):
+    """Two entities that show up in the same turn 3+ times should surface."""
+    store.resolve_or_create_entity("Jamie", entity_type="person")
+    store.resolve_or_create_entity("Yosemite", entity_type="place")
+
+    # 3 turns mentioning both
+    for content in [
+        "I went climbing with Jamie at Yosemite last weekend.",
+        "Jamie wants to go back to Yosemite in spring.",
+        "Showed Jamie my Yosemite photos again.",
+    ]:
+        store.append_turn("s1", "user", content)
+
+    cands = Surfacer(store, now=NOW).co_occurrences(min_count=3)
+    assert len(cands) == 1
+    assert "Jamie" in cands[0].message and "Yosemite" in cands[0].message
+    assert cands[0].evidence["count"] == 3
+
+
+def test_co_occurrence_silent_below_threshold(store):
+    store.resolve_or_create_entity("Jamie", entity_type="person")
+    store.resolve_or_create_entity("Yosemite", entity_type="place")
+    store.append_turn("s1", "user", "Jamie and I went to Yosemite once.")  # 1 mention
+
+    cands = Surfacer(store, now=NOW).co_occurrences(min_count=3)
+    assert cands == []
+
+
+def test_co_occurrence_word_boundary(store):
+    """'jamie' must not match 'jamies' or 'jamie's'."""
+    store.resolve_or_create_entity("Jam", entity_type="thing")
+    store.resolve_or_create_entity("Yo", entity_type="thing")
+    # The substring 'jam' appears in 'jamie' but should NOT count
+    for _ in range(5):
+        store.append_turn("s1", "user", "Jamie went to Yosemite.")
+
+    cands = Surfacer(store, now=NOW).co_occurrences(min_count=3)
+    # 'Jam' and 'Yo' should NOT co-occur since they only match as substrings
+    assert cands == []
+
+
 # --- cooldown ----------------------------------------------------------------
 
 
