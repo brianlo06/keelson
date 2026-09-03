@@ -51,6 +51,10 @@ def _omega_in_range(omega: float, lo: float, hi: float) -> bool:
 
 
 def _matches_forbidden(claim: Claim, rule: ForbiddenClaim) -> bool:
+    if rule.subject_pattern is not None and not re.search(
+        rule.subject_pattern, claim.subject, re.IGNORECASE
+    ):
+        return False
     if not re.search(rule.predicate_pattern, claim.predicate, re.IGNORECASE):
         return False
     if rule.object_pattern is None:

@@ -10,7 +10,7 @@ A claim is a discrete fact that could be looked up later.
 - "My dog Penny is a corgi" → claim
 - "I'm exhausted today" → ambiguous (transient state; see rules below)
 - "Nice weather we're having" → NOT a claim
-- "I might move to Berlin" → NOT a claim (hedge, possibility — not fact)
+- "I might move to Berlin" → hedged claim (`considering: moving to Berlin`, LOW ω — see "Hedged self-disclosure")
 
 ## Output schema
 
@@ -82,15 +82,31 @@ were too much") is NOT a separate claim — extract only the event itself.
 | **0.70** | User states a current intention or plan ("I start a new job Monday") |
 | **0.50** | User reports a fact about someone else ("My sister got married") |
 | **0.25** | You infer something not directly stated |
-| **0.10** | Speculation, dream content, hypothetical |
+| **0.10–0.15** | Hedged self-disclosure ("I think I might be burning out"); speculation, dream content, hypothetical |
 
 When uncertain, default to the LOWER value.
+
+## Hedged self-disclosure — extract at LOW ω, don't drop
+
+When the user hedges a statement about their OWN ongoing state or a live
+possibility ("I think…", "I might…", "maybe I'm…"), the hedge lowers ω —
+it does not erase the claim. Someone saying "I think I might be burning
+out" is disclosing something load-bearing; store it, marked uncertain.
+
+- "I think I might be burning out" → `experiencing: possible burnout` (ω 0.15)
+- "I might apply to grad school" → `considering: applying to grad school` (ω 0.25)
+- "Maybe I'm just not a city person" → `considering: not being a city person` (ω 0.15)
+
+Distinguish this from momentary states: "I'm tired right now" is transient
+(do not extract); "I think I might be burning out" describes an ongoing
+condition the user is tentatively naming (extract, low ω). Pure
+counterfactuals ("what if I'd taken that job") remain non-claims.
 
 ## Predicates
 
 Prefer canonical snake_case forms when they fit; invent new ones if needed:
 
-`works_at`, `worked_at_previously`, `role_at`, `lives_in`, `lived_in_previously`, `born_in`, `has_relationship`, `has_sibling`, `has_pet`, `has_child`, `likes`, `dislikes`, `loves`, `hates`, `is`, `was`, `identifies_as`, `did`, `attended`, `visited`, `believes`, `prefers`, `avoids`, `age`, `said`, `considering`.
+`works_at`, `worked_at_previously`, `role_at`, `lives_in`, `lived_in_previously`, `born_in`, `has_relationship`, `has_sibling`, `has_pet`, `has_child`, `likes`, `dislikes`, `loves`, `hates`, `is`, `was`, `identifies_as`, `did`, `attended`, `visited`, `believes`, `prefers`, `avoids`, `age`, `said`, `considering`, `experiencing`.
 
 ## Time
 
@@ -112,6 +128,15 @@ If the user is adding (not replacing), leave it `null`.
 ## Other-subject claims
 
 When the claim is about a person other than the user, use `user.<role>` for related people (`user.mom`, `user.sister`, `user.coworker`) or the proper noun for non-relations. omega is at most 0.50 for these.
+
+CRITICAL — attribute facts to the right subject. When a sentence mentions
+both the user and someone else, decide WHOSE fact each detail is before
+choosing `subject`. "My sister is visiting from Berlin" contains a locative
+about the SISTER (she lives in Berlin), not the user — emitting
+`subject: user, predicate: lives_in, object: Berlin` would be a
+fabrication. Prepositional phrases attached to the other person
+("visiting from X", "calling from X", "who works at Y") belong to that
+person's subject, at ω ≤ 0.50.
 
 ## DO NOT extract
 
@@ -168,6 +193,40 @@ Note: a single discrete event is ONE claim. The duration ("after 30 years") is
 part of the event description, not a separate `career_duration` claim. For
 third parties, ω is capped at 0.50 — you know what the user told you, not
 whether it's accurate.
+
+### Someone else's fact stays theirs
+
+USER: "My sister Mara is visiting from Berlin this week."
+
+```json
+{
+  "claims": [
+    {"subject": "user", "predicate": "has_sibling", "object": "Mara (sister)", "valid_from": "now", "omega": 1.00, "supersedes_hint": null, "source_phrase": "My sister Mara"},
+    {"subject": "user.sister", "predicate": "lives_in", "object": "Berlin", "valid_from": "now", "omega": 0.50, "supersedes_hint": null, "source_phrase": "visiting from Berlin"}
+  ]
+}
+```
+
+CRITICAL: "visiting from Berlin" tells you where MARA lives. Do NOT emit
+`subject: user, predicate: lives_in, object: Berlin` — the user's location
+is unstated here. The sibling relationship is the user's own fact (ω 1.00);
+where the sibling lives is a reported third-party fact (ω 0.50).
+
+### Hedged self-disclosure (extract, low ω)
+
+USER: "I think I might be burning out."
+
+```json
+{
+  "claims": [
+    {"subject": "user", "predicate": "experiencing", "object": "possible burnout", "valid_from": "now", "omega": 0.15, "supersedes_hint": null, "source_phrase": "I think I might be burning out"}
+  ]
+}
+```
+
+Note: the hedge ("think", "might") lowers ω to 0.10–0.15; it does not make
+this a non-claim. For a journaling user, tentatively-named ongoing states
+are exactly what should be remembered.
 
 ### Negation: "I'm not X"
 

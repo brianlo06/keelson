@@ -31,12 +31,17 @@ class ExpectedClaim:
 class ForbiddenClaim:
     predicate_pattern: str
     object_pattern: str | None = None
+    # When set, the rule only fires on claims whose subject matches — so a
+    # fact can be forbidden for the user while staying legal for a third
+    # party (e.g. forbid `user lives_in Berlin`, allow `user.sister` to).
+    subject_pattern: str | None = None
 
     @classmethod
     def from_json(cls, d: dict) -> ForbiddenClaim:
         return cls(
             predicate_pattern=d["predicate_pattern"],
             object_pattern=d.get("object_pattern"),
+            subject_pattern=d.get("subject_pattern"),
         )
 
 

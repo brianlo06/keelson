@@ -109,6 +109,40 @@ def test_forbidden_claim_is_hard_floor():
     assert score.forbidden_hit is True
 
 
+def test_forbidden_subject_pattern_scopes_the_rule():
+    """Regression-006 shape (FINDINGS.md): `lives_in: Berlin` is forbidden for
+    the USER but fine for the sister — the rule must match on subject."""
+    forbidden = ForbiddenClaim(
+        subject_pattern="^user$", predicate_pattern="^lives_in$", object_pattern="Berlin",
+    )
+    ex = _example([], forbidden=[forbidden])
+
+    # Correct attribution: the sister lives in Berlin — no hit.
+    ok = score_example(
+        ex, [_claim(subject="user.sister", predicate="lives_in", obj="Berlin", omega=0.5)],
+        _judge_perfect(),
+    )
+    assert ok.forbidden_hit is False
+
+    # Mis-attribution: the user does not live in Berlin — hard floor.
+    bad = score_example(
+        ex, [_claim(subject="user", predicate="lives_in", obj="Berlin", omega=0.5)],
+        _judge_perfect(),
+    )
+    assert bad.forbidden_hit is True
+    assert bad.composite == 0.0
+
+
+def test_forbidden_subject_pattern_parses_from_json():
+    rule = ForbiddenClaim.from_json(
+        {"subject_pattern": "^user$", "predicate_pattern": "lives_in", "object_pattern": "Berlin"}
+    )
+    assert rule.subject_pattern == "^user$"
+    # Older rules without the field still load (subject unrestricted).
+    legacy = ForbiddenClaim.from_json({"predicate_pattern": "lives_in"})
+    assert legacy.subject_pattern is None
+
+
 def test_omega_out_of_range_hurts_calibration():
     expected = ExpectedClaim(
         subject="user", predicate="works_at", object_pattern="Anthropic",
