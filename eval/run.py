@@ -144,7 +144,7 @@ def main() -> int:
         print(f"\n*** {int(total['forbidden_hits'])} example(s) emitted FORBIDDEN claims (precision floor hit) ***")
 
     if holistic is not None:
-        print(f"\n=== HOLISTIC (LLM-as-judge) ===")
+        print("\n=== HOLISTIC (LLM-as-judge) ===")
         print(f"{'category':<30s} {'n':>4s} {'overall':>8s} {'cov':>6s} {'prec':>6s} "
               f"{'omega':>6s} {'use':>6s}")
         all_holistic: list[HolisticVerdict] = []

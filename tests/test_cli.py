@@ -7,9 +7,7 @@ guard against import errors and the dispatch logic.
 
 from __future__ import annotations
 
-from pathlib import Path
 
-import pytest
 
 from keelson.store import KeelsonStore
 

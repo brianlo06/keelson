@@ -22,7 +22,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from keelson.compose import llm_compose, rule_based_compose
+from keelson.compose import llm_compose
 from keelson.retrieval import Retriever
 from keelson.store import KeelsonStore
 from keelson.surface import Surfacer

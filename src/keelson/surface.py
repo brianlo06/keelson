@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta, timezone
 from typing import Literal
 
-from keelson.store import ClaimRow, KeelsonStore, _now, _to_claim
+from keelson.store import KeelsonStore, _now, _to_claim
 
 SurfaceType = Literal[
     "stale_relationship",
@@ -361,7 +361,7 @@ class Surfacer:
             return []
         cutoff = (self.now - timedelta(days=days)).isoformat(timespec="seconds")
         rows = self.store.conn.execute(
-            f"""
+            """
             SELECT surface_type, target_key, MAX(surfaced_at) AS last_shown,
                    GROUP_CONCAT(COALESCE(user_response, ''), '|') AS responses
             FROM surfaced

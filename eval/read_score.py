@@ -18,7 +18,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 
 from keelson.compose import ComposedResponse
-from eval.read_types import ReadExample, ReadExpected
+from eval.read_types import ReadExample
 
 
 @dataclass

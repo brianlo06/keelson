@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from keelson.compose import rule_based_compose
-from keelson.retrieval import QuerySpec, Retriever, rule_based_parse
+from keelson.retrieval import Retriever, rule_based_parse
 from keelson.store import KeelsonStore
 
 

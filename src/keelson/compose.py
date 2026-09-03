@@ -18,8 +18,8 @@ import os
 from dataclasses import dataclass, field
 from typing import Callable, TYPE_CHECKING
 
-from keelson.retrieval import QuerySpec, RetrievalResult
-from keelson.store import ClaimRow, KeelsonStore, TurnRow
+from keelson.retrieval import RetrievalResult
+from keelson.store import ClaimRow, KeelsonStore
 
 if TYPE_CHECKING:
     import anthropic
